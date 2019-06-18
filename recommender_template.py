@@ -16,7 +16,7 @@ class Recommender():
 
 
 
-    def fit(self, reviews_loc, movies_loc, latent_features, n_iter, learning_rate  ):
+    def fit(self, reviews_loc, movies_loc, latent_features=15, n_iter=100, learning_rate=0.001 ):
         '''
         fit the recommender to your dataset and also have this save the results
         to pull from when you need to make predictions
@@ -38,10 +38,10 @@ class Recommender():
         del self.reviews['Unnamed: 0']
 
         # Create user-by-item matrix
-        user_items = self.reviews[['user_id', 'movie_id', 'rating', 'timestamp']]
-        user_by_movie = user_items.groupby(['user_id', 'movie_id'])['rating'].max().unstack()
+        self.reviews = self.reviews[['user_id', 'movie_id', 'rating', 'timestamp']]
+        self.user_item_df = self.reviews.groupby(['user_id', 'movie_id'])['rating'].max().unstack()
 
-        self.user_item_matrix = np.array(user_by_movie)
+        self.user_item_matrix = np.array(self.user_item_df)
         self.latent_features = latent_features
         self.learning_rate = learning_rate
         self.iter = n_iter
@@ -50,8 +50,8 @@ class Recommender():
         self.n_users = self.user_item_matrix.shape[0]
         self.n_movies = self.user_item_matrix.shape[1]
         self.n_ratings = np.count_nonzero(~np.isnan(self.user_item_matrix))
-        self.movie_ids = np.array(user_by_movie.columns)
-        self.user_ids = np.array(user_by_movie.index)
+        self.movie_ids = np.array(self.user_item_df.columns)
+        self.user_ids = np.array(self.user_item_df.index)
 
         # initialize the user and movie matrices with random values
         user_mat = np.random.rand(self.n_users, self.latent_features)
@@ -74,7 +74,7 @@ class Recommender():
             for user in range(self.n_users):
                 for movie in range(self.n_movies):
                     # if the rating exists
-                    if np.isnan(self.user_item_matrix[user, movie]) == False:
+                    if self.user_item_matrix[user, movie] > 0:
                         # compute the error as the actual minus the dot product of the user
                         # and movie latent features
                         prediction = np.dot(user_mat[user], movie_mat[:,movie])
@@ -87,8 +87,8 @@ class Recommender():
                         user_mat[user] += learning_rate * 2 * diff * movie_mat[:, movie]
                         movie_mat[:, movie] += learning_rate * 2 * diff * user_mat[user]
 
-        # print results for iteration
-        print("%d \t\t %f" % (i + 1, sse_accum / self.n_ratings))
+            #print results for iteration
+            print("%d \t\t %f" % (i + 1, sse_accum / self.n_ratings))
 
         # FunkSVD solution
         # Storing the user mat and movie mat
@@ -98,17 +98,77 @@ class Recommender():
         # Knowledge base solution
         self.ranked_movies = rf.create_ranked_df(self.movies, self.reviews)
 
-    def predict_rating(self, ):
+    def predict_rating(self, user_id, movie_id ):
         '''
         makes predictions of a rating for a user on a movie-user combo
+
+        :param user_id: user id (int)
+        :param movie_id: movie_id (int)
+
+        :return prediction: The predicted rating for the user-movie (float)
         '''
 
-    def make_recs(self,):
+        # Getting user row and movie column
+        user_row = np.where(self.user_ids == user_id)[0][0]
+        movie_col = np.where(self.movie_ids == movie_id)[0][0]
+
+        # Dot product of that row and column in U and V to make prediction
+        prediction = np.dot(self.user_mat[user_row], self.movie_mat[:,movie_col])
+
+        return prediction
+
+    def make_recs(self,_id, _id_type='movie', rec_num=5):
         '''
         given a user id or a movie that an individual likes
         make recommendations
+
+        :param _id: id of the user or movie (int)
+        :param _id_type: "movie" or "user" (str)
+        :param rec_num: number of desired recommendations (int)
+
+        :return rec_ids: list of recommended movie ids for @_id_type
+        :return rec_names: list of recommended movie names for @_id_type
+
         '''
 
+        if _id_type == 'user':
+
+            if _id in self.user_item_df.index:
+                # Get the index of which row the user is in for use in U matrix
+                user_row = np.where(self.user_ids == _id)[0][0]
+                # take the dot product of that U row and the V matrix
+                predictions = np.dot(self.user_mat[user_row] ,self.movie_mat)
+                pred_df = pd.DataFrame(predictions, index=self.movie_ids, columns=['Predictions'])
+                # Sorting the pred df to have the best rated movies first
+                pred_df.sort_values(by='Predictions', ascending=False, inplace=True)
+                rec_ids = pred_df.index[:rec_num]
+
+            else:
+                rec_ids = self.ranked_movies['movie_id'][:rec_num]
+
+        if _id_type == 'movie':
+
+            similar_movies = rf.find_similar_movies(_id,self.movies)
+            best_movies = pd.DataFrame(self.ranked_movies['movie'].values)
+            recs = best_movies[best_movies['movie'].isin(similar_movies)][:rec_num]
+            rec_ids = np.array(recs.index)
+
+        rec_names = rf.get_movie_names(rec_ids)
+
+        return rec_ids, rec_names
 
 if __name__ == '__main__':
     # test different parts to make sure it works
+    recomm = Recommender()
+
+    recomm.fit('Data/reviews_clean.csv', 'Data/movies_clean.csv')
+
+    print("Learning rate, latent features, number of iterations")
+    print(recomm.learning_rate, recomm.latent_features, recomm.iter)
+
+    for user in recomm.user_item_df.index:
+
+        rec_ids, rec_names = recomm.make_recs(user,'user')
+        print("For user {}, our recommendations are: \n {}".format(user, rec_names))
+        break
+
