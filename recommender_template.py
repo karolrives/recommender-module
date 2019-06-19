@@ -38,8 +38,8 @@ class Recommender():
         del self.reviews['Unnamed: 0']
 
         # Create user-by-item matrix
-        self.reviews = self.reviews[['user_id', 'movie_id', 'rating', 'timestamp']]
-        self.user_item_df = self.reviews.groupby(['user_id', 'movie_id'])['rating'].max().unstack()
+        self.train_df = self.reviews[['user_id', 'movie_id', 'rating', 'timestamp']]
+        self.user_item_df = self.train_df.groupby(['user_id', 'movie_id'])['rating'].max().unstack()
 
         self.user_item_matrix = np.array(self.user_item_df)
         self.latent_features = latent_features
@@ -153,7 +153,7 @@ class Recommender():
             recs = best_movies[best_movies['movie'].isin(similar_movies)][:rec_num]
             rec_ids = np.array(recs.index)
 
-        rec_names = rf.get_movie_names(rec_ids)
+        rec_names = rf.get_movie_names(rec_ids, self.movies)
 
         return rec_ids, rec_names
 
@@ -161,14 +161,17 @@ if __name__ == '__main__':
     # test different parts to make sure it works
     recomm = Recommender()
 
-    recomm.fit('Data/reviews_clean.csv', 'Data/movies_clean.csv')
+    recomm.fit('Data/train_data.csv', 'Data/movies_clean.csv')
 
     print("Learning rate, latent features, number of iterations")
     print(recomm.learning_rate, recomm.latent_features, recomm.iter)
-
+    counter = 0
     for user in recomm.user_item_df.index:
 
-        rec_ids, rec_names = recomm.make_recs(user,'user')
-        print("For user {}, our recommendations are: \n {}".format(user, rec_names))
-        break
+        if counter < 15:
+            rec_ids, rec_names = recomm.make_recs(user,'user')
+            print("For user {}, our recommendations are: \n {}".format(user, rec_names))
+            counter += 1
+        else:
+            break
 
